@@ -82,7 +82,7 @@ def main(openrc_path, tag, public_key_path):
             server_names_ips[server.name] = floating_ip
         else:
 <<<<<<< HEAD
-     server_names_ips[server.name] = server.addresses[Network.name][0]['addr']
+     server_names_ips[server.name] = server.addresses[network.name][0]['addr']
 =======
             server_names_ips[server.name] = server.addresses[network.name][0]['addr']
 >>>>>>> ea85aa6 (Your message about the changes)
@@ -100,7 +100,7 @@ def main(openrc_path, tag, public_key_path):
                                     web_sg, 
                                     user_data=user_data)
 <<<<<<< HEAD
-      server_names_ips[server.name] = server.addresses[Network.name][0]['addr']
+      server_names_ips[server.name] = server.addresses[network.name][0]['addr']
 =======
         server_names_ips[server.name] = server.addresses[network.name][0]['addr']
 >>>>>>> ea85aa6 (Your message about the changes)
