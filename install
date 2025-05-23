@@ -133,4 +133,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args.openrc_path, args.tag, args.public_key_path)
-
