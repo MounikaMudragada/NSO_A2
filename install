@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+
+import sys
+import logging
+import argparse
+import openstack
+import logging
+import base64
+
+from infrastructure import (
+    load_openrc,
+    create_or_get_keypair,
+    create_or_get_network,
+    create_or_get_server, 
+    assign_or_get_floating_ip,
+    abs_path
+)
+from remove_infra import cleanup_excess_floating_ips
+from security_groups import (
+    create_or_get_bastion_security_group,
+    create_or_get_haproxy_security_group,
+    create_or_get_webservers_security_group,
+)
+from config_hosts_generator import write_ansible_and_ssh_config
+from variables import ( 
+    WEBSERVER_USER_DATA, 
+    HAPROXY_USER_DATA,
+)
+from ansible_helper import (
+    check_reachability,
+    run_ansible_playbook,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+def main(openrc_path, tag, public_key_path):
+    
+    logging.info("Loading OpenStack credentials from the provided RC file.")
+    load_openrc(openrc_path)
+
+    logging.info("Connecting to OpenStack.")
+    conn = openstack.connect()
+    
+    logging.info("Creating keypair.")
+    keypair = create_or_get_keypair(tag, public_key_path, conn)
+    
+    logging.info("Creating network, subnet, and router.")
+    network, subnet, router = create_or_get_network(tag, conn)
+    
+    logging.info("Creating security groups.")
+    bastion_sg = create_or_get_bastion_security_group(tag, conn)
+    haproxy_sg = create_or_get_haproxy_security_group(tag, conn)
+    web_sg = create_or_get_webservers_security_group(tag, conn)
+    
+    logging.info("Deleting excess unattached floating IPs if it exceeds 2.")
+    cleanup_excess_floating_ips(conn, keep=2) 
+    
+    server_names_ips = {}
+    names = [f"{tag}_bastion", f"{tag}_haproxy"]
+    for name in names:
+        logging.info(f"Creating server: {name}.")
+        security_group = bastion_sg if f"{tag}_bastion" in name else haproxy_sg
+        user_data = HAPROXY_USER_DATA if f"{tag}_haproxy" in name else None
+        if user_data:
+            user_data = base64.b64encode(user_data.encode()).decode()
+        server = create_or_get_server(conn, name, 
+                                    tag, 
+                                    network, 
+                                    keypair, 
+                                    security_group, 
+                                    user_data=user_data)
+
+        logging.info(f"Assigning floating IP to {name}.")
+        floating_ip = assign_or_get_floating_ip(conn,
+        server
+        )
+        if name == f"{tag}_bastion":
+            server_names_ips[server.name] = floating_ip
+        else:
+            server_names_ips[server.name] = server.addresses['shivanetwork'][0]['addr']
+    
+    num_servers = int(open("./servers.conf").read().strip())
+    logging.info(f"Creating {num_servers} web servers.")
+    for i in range(num_servers):
+        server_name = f"{tag}_dev{i+1}"
+        logging.info(f"Creating server: {server_name}.")
+        user_data = base64.b64encode(WEBSERVER_USER_DATA.encode()).decode()
+        server = create_or_get_server(conn, server_name, 
+                                    tag, 
+                                    network, 
+                                    keypair, 
+                                    web_sg, 
+                                    user_data=user_data)
+        server_names_ips[server.name] = server.addresses['shivanetwork'][0]['addr']
+    
+    write_ansible_and_ssh_config(server_names_ips, tag, abs_path(public_key_path)[:-4] )
+    
+    logging.info("Check if all servers are reachable.")
+    if check_reachability(abs_path("./hosts"), abs_path(f"./{tag}_config")):
+        logging.info("All servers are reachable.")
+    else:
+        logging.error("Some servers are unreachable. Please check the network configuration.")
+        sys.exit(1)
+    logging.info("Run ansible playbook.")
+    run_ansible_playbook(abs_path("./hosts"), abs_path(f"./{tag}_config"), abs_path("./site.yaml"))
+    
+if __name__ == "__main__":
+    
+    parser = argparse.ArgumentParser(
+        description="Script to install using OpenStack RC file, tag, and public key."
+    )
+    parser.add_argument(
+        "openrc_path",
+        type=str,
+        help="Path to the OpenStack RC file (e.g., openrc.sh)"
+    )
+    parser.add_argument(
+        "tag",
+        type=str,
+        help="Tag or version identifier (e.g., v1.0.0)"
+    )
+    parser.add_argument(
+        "public_key_path",
+        type=str,
+        help="Path to the public SSH key file (e.g., ~/.ssh/id_rsa.pub)"
+    )
+
+    args = parser.parse_args()
+    main(args.openrc_path, args.tag, args.public_key_path)
