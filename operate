@@ -150,6 +150,7 @@ def main(openrc_path, tag, public_key_path):
                 abs_path(public_key_path)[:-4]
             )
             logging.info("Updating the haproxy configuration.")
+            time.sleep(10)
             run_ansible_playbook(
                 inventory_path=abs_path("./hosts"),
                 config_path=abs_path(f"./{tag}_config"),
