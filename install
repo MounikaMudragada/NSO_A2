@@ -6,6 +6,7 @@ import argparse
 import openstack
 import logging
 import base64
+import time
 
 from infrastructure import (
     load_openrc,
@@ -81,7 +82,7 @@ def main(openrc_path, tag, public_key_path):
         if name == f"{tag}_bastion":
             server_names_ips[server.name] = floating_ip
         else:
-     server_names_ips[server.name] = server.addresses[network.name][0]['addr']
+            server_names_ips[server.name] = server.addresses[network.name][0]['addr']
     
     num_servers = int(open("./servers.conf").read().strip())
     logging.info(f"Creating {num_servers} web servers.")
@@ -95,7 +96,7 @@ def main(openrc_path, tag, public_key_path):
                                     keypair, 
                                     web_sg, 
                                     user_data=user_data)
-      server_names_ips[server.name] = server.addresses[network.name][0]['addr']
+        server_names_ips[server.name] = server.addresses[network.name][0]['addr']
     
     write_ansible_and_ssh_config(server_names_ips, tag, abs_path(public_key_path)[:-4] )
     
@@ -106,6 +107,7 @@ def main(openrc_path, tag, public_key_path):
         logging.error("Some servers are unreachable. Please check the network configuration.")
         sys.exit(1)
     logging.info("Run ansible playbook.")
+    time.sleep(10)
     run_ansible_playbook(abs_path("./hosts"), abs_path(f"./{tag}_config"), abs_path("./site.yaml"))
     
 if __name__ == "__main__":
@@ -131,3 +133,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args.openrc_path, args.tag, args.public_key_path)
+
