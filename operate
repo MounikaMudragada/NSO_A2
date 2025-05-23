@@ -60,7 +60,7 @@ def main(openrc_path, tag, public_key_path):
         logging.info("Read the servers.conf file to get the number of servers required.")
         no_of_servers_required = int(open("./servers.conf").read().strip())
         logging.info("checking the reachability of the servers using curl haproxy.")
-     reachable_hosts, unreachable_hosts = check_reachability_via_haproxy(
+        reachable_hosts, unreachable_hosts = check_reachability_via_haproxy(
             floating_ip[0],
             5000, 
             abs_path("./hosts")
