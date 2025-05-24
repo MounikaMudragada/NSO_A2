@@ -1,75 +1,125 @@
 #!/usr/bin/env python3
-import os
-import logging
-import argparse
-import openstack
 
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import time
+from typing import Optional
+
+import openstack
+from openstack.exceptions import ConflictException
+
+from infrastructure import load_openrc
 from remove_infra import (
+    delete_floating_ips,
     delete_keypair,
     delete_network,
     delete_router,
-    delete_subnet,
     delete_security_groups,
-    delete_floating_ips,
     delete_servers_by_tag,
-    )
-from infrastructure import load_openrc
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    delete_subnet,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
-def main(openrc_path, tag, public_key_path):
-    # Load OpenStack credentials from the provided RC file.
+WAIT_INTERVAL_S = 5     
+WAIT_TIMEOUT_S = 600  
+
+
+def _servers_delete(conn: openstack.connection.Connection, tag: str) -> None:
+    """Block until **all** servers whose name contains *tag* are gone."""
+    start = time.time()
+    while True:
+        servers = [s for s in conn.compute.servers(details=False) if tag in (s.name or "")]
+        if not servers:
+            logging.info("All servers have been deleted.")
+            return
+
+        if time.time() - start > WAIT_TIMEOUT_S:
+            raise TimeoutError(
+                f"Timed‑out ({WAIT_TIMEOUT_S}s) waiting for servers with tag '{tag}' to disappear."
+            )
+
+        logging.info(
+            f"Waiting for {len(servers)} server(s) to be deleted … retrying in {WAIT_INTERVAL_S}s."
+        )
+        time.sleep(WAIT_INTERVAL_S)
+
+
+#main
+
+def main(openrc_path: str, tag: str, public_key_path: Optional[str] = None) -> None: # noqa: D401
+    """Tear down all resources that carry tag in their name/metadata.
+
+    *public_key_path* is accepted for backward compatibility but is not used.
+    """
+
+    # 1. Authenticate with OpenStack.
     load_openrc(openrc_path)
-
     conn = openstack.connect()
 
-    # Delete the servers
+    # 2. Delete servers and wait until they are actually gone.
     delete_servers_by_tag(conn, tag)
-    
-    # Delete security groups for the user.
-    delete_security_groups(tag, conn)
-    # Delete the network, subnet, and router for the user. 
+    _servers_delete(conn, tag)
+
+    # 3. Release floating IPs *before* removing the network.
+    delete_floating_ips(conn)
+
+    # 4. Network resources: router → subnet → network.
     delete_router(tag, conn)
     delete_subnet(tag, conn)
     delete_network(tag, conn)
-    
-    # Delete the keypair for the user.
-    delete_keypair(tag, conn)
-    
-    # Delete the floating IPs.
-    delete_floating_ips(conn)
-    files_to_remove = ["hosts", f"{tag}_config"]
 
-    for file in files_to_remove:
-        if os.path.exists(file):
-            logging.info(f"Deleting the file: {file}")
-            os.remove(file)
+    # 5. Security groups. Retry a few times to handle transient port refs.
+    max_retries = 6
+    for attempt in range(1, max_retries + 1):
+        try:
+            delete_security_groups(tag, conn)
+            break  
+        except ConflictException as exc:
+            if attempt == max_retries:
+                raise  
+            logging.warning(
+                f"Security groups still in use (attempt {attempt}/{max_retries}): {exc}. "
+                f"Retrying in {WAIT_INTERVAL_S}s …"
+            )
+            time.sleep(WAIT_INTERVAL_S)
+
+    # 6. Finally, the keypair that was uploaded for this lab.
+    delete_keypair(tag, conn)
+
+    # 7. Local artefacts on the workstation.
+    for fname in ("hosts", f"{tag}_config"):
+        if os.path.exists(fname):
+            logging.info(f"Deleting the file: {fname}")
+            os.remove(fname)
         else:
-            logging.info(f"No file exists: {file}")
+            logging.info(f"No file exists: {fname}")
+
+
+#ep
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Script to install using OpenStack RC file, tag, and public key."
+        description=(
+            "Remove all OpenStack resources tagged with <tag>. The third "
+            "argument (public_key_path) is optional and ignored — it is kept "
+            "only for compatibility with older automation wrappers."
+        )
     )
-    parser.add_argument(
-        "openrc_path",
-        type=str,
-        help="Path to the OpenStack RC file (e.g., openrc.sh)"
-    )
-    parser.add_argument(
-        "tag",
-        type=str,
-        help="Tag or version identifier (e.g., v1.0.0)"
-    )
+    parser.add_argument("openrc_path", help="Path to the OpenStack RC file")
+    parser.add_argument("tag", help="Resource tag to clean up")
     parser.add_argument(
         "public_key_path",
-        type=str,
-        help="Path to the public SSH key file (e.g., ~/.ssh/id_rsa.pub)"
+        nargs="?",
+        help="[Ignored] Path to the public SSH key — kept for compatibility",
     )
 
-    args = parser.parse_args()
-    main(args.openrc_path, args.tag, args.public_key_path)
+    main(**vars(parser.parse_args()))
 
