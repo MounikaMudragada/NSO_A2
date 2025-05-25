@@ -8,6 +8,7 @@ import base64
 import sys
 
 from haproxy_curl import check_reachability_via_haproxy
+from get_active_servers import check_reachability_from_openstack
 from infrastructure import (
     load_openrc,
     create_or_get_keypair,
@@ -59,11 +60,12 @@ def main(openrc_path, tag, public_key_path):
         present_time = time.time()
         logging.info("Read the servers.conf file to get the number of servers required.")
         no_of_servers_required = int(open("./servers.conf").read().strip())
-        logging.info("checking the reachability of the servers using curl haproxy.")
-        reachable_hosts, unreachable_hosts = check_reachability_via_haproxy(
-            floating_ip[0],
-            5000, 
-            abs_path("./hosts")
+        logging.info("checking the avaialbale servers in OpenStack with tag: %s", tag)
+        reachable_hosts, unreachable_hosts = check_reachability_from_openstack(
+            conn, 
+            tag, 
+            abs_path("./hosts"),
+            group_name="webservers"
         )
         if len(reachable_hosts) == no_of_servers_required:
             logging.info("We have required number of servers i.e %d", no_of_servers_required)
