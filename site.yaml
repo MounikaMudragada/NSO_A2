@@ -5,36 +5,6 @@
   become: true
   tags: webservers
   tasks:
-    - name: Wait until apt lock is released
-      shell: |
-        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-          echo "Waiting for other apt process to finish..."
-          sleep 20
-        done
-      register: apt_wait_result
-      changed_when: false
-
-    - name: Install required packages with retries
-      block:
-        - name: Try installing snmpd and python3-pip
-          apt:
-            name:
-             - snmpd
-             - python3-pip
-            state: present
-            update_cache: yes
-          register: apt_result
-          retries: 5
-          delay: 10
-          until: apt_result is succeeded
-
-
-    - name: Ensure SNMP config directory exists
-      file:
-        path: /etc/snmp
-        state: directory
-        mode: '0755'
-
     - name: Copy snmpd.conf
       copy:
         src: templete_files/snmpd.conf.j2
