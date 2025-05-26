@@ -5,6 +5,10 @@
   become: true
   tags: webservers
   tasks:
+    - name: make sure the apt cache is up to date
+      apt:
+        update_cache: yes
+  
     - name: Copy snmpd.conf
       copy:
         src: templete_files/snmpd.conf.j2
