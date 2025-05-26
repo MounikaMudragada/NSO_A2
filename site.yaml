@@ -5,10 +5,26 @@
   become: true
   tags: webservers
   tasks:
-    - name: make sure the apt cache is up to date
+    - name: Wait until apt lock is released
+      shell: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+          echo "Waiting for other apt process to finish..."
+          sleep 20
+        done
+      register: apt_wait_result
+      changed_when: false
+      
+    - name: Update cache
+      become: yes
       apt:
         update_cache: yes
-  
+        cache_valid_time: 7200
+    - name: Ensure SNMP config directory exists
+      file:
+        path: /etc/snmp
+        state: directory
+        mode: '0755'
+
     - name: Copy snmpd.conf
       copy:
         src: templete_files/snmpd.conf.j2

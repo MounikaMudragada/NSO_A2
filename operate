@@ -110,6 +110,7 @@ def main(openrc_path, tag, public_key_path):
                 tag,
                 abs_path(public_key_path)[:-4]
             )
+            time.sleep(10)  # Wait for servers to be created
             logging.info("Check if all servers are reachable.")
             if check_reachability(
                 inventory_path=abs_path("./hosts"),
@@ -143,7 +144,7 @@ def main(openrc_path, tag, public_key_path):
                     logging.warning("Server %s not found.", server_name)
             logging.info("We have deleted the servers which are not required.")
             logging.info("Updating the hosts file and config file.")
-            
+            time.sleep(10)  # Wait for servers to be deleted
             total_servers = list(conn.compute.servers())
             server_names_ip_dict = extract_names_ips_from_server(total_servers, tag)
             write_ansible_and_ssh_config(
